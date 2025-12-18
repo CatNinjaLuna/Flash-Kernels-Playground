@@ -60,6 +60,32 @@ Configuration: Batch=1, Heads=32, Sequence=2048, Dim=128 (FP16)
 -  Block-wise tiling (BLOCK_M=32, BLOCK_N=32) fits in shared memory
 -  ~40% HBM traffic reduction via kernel fusion
 
+### Attention Scaling Analysis
+
+Comprehensive scaling test across batch sizes and sequence lengths:
+
+| Batch | SeqLen | Baseline | Triton | Speedup   | BL GFLOPS | TR GFLOPS |
+| ----- | ------ | -------- | ------ | --------- | --------- | --------- |
+| 1     | 512    | 0.05ms   | 0.03ms | 1.82×     | 11714     | 21322     |
+| 1     | 1024   | 0.09ms   | 0.08ms | 1.10×     | 23223     | 25541     |
+| 1     | 2048   | 0.73ms   | 0.27ms | 2.69×     | 11846     | 31869     |
+| 1     | 4096   | 3.04ms   | 1.13ms | 2.68×     | 11317     | 30367     |
+| 2     | 512    | 0.06ms   | 0.06ms | 1.10×     | 17457     | 19166     |
+| 2     | 1024   | 0.18ms   | 0.14ms | 1.33×     | 23600     | 31283     |
+| 2     | 2048   | 1.79ms   | 0.50ms | **3.60×** | 9603      | 34572     |
+| 2     | 4096   | 6.27ms   | 2.06ms | 3.05×     | 10957     | 33409     |
+| 4     | 512    | 0.10ms   | 0.07ms | 1.43×     | 20847     | 29854     |
+| 4     | 1024   | 0.62ms   | 0.25ms | 2.50×     | 13917     | 34757     |
+| 4     | 2048   | 3.61ms   | 1.09ms | 3.31×     | 9506      | 31503     |
+| 4     | 4096   | 12.45ms  | 4.09ms | 3.04×     | 11041     | 33612     |
+
+**Key Insights**:
+
+-  **Speedup increases with problem size**: Small sequences (512) show ~1.1-1.8× speedup, while larger sequences (2048-4096) achieve 2.7-3.6× speedup
+-  **Best performance at B=2, S=2048**: 3.60× speedup demonstrates sweet spot for RTX 5090's memory hierarchy
+-  **Consistent Triton throughput**: 30-35 GFLOPS across larger problems, while baseline degrades from 23→10 GFLOPS
+-  **Memory access patterns**: Triton's fused kernel reduces HBM round-trips, showing bigger advantage as problem size grows
+
 **Previous benchmarks**:
 
 -  ~65–70% Tensor Core peak utilization (measured via Nsight Compute)

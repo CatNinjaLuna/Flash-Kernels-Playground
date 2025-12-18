@@ -66,6 +66,75 @@ Configuration: Batch=1, Heads=32, Sequence=2048, Dim=128 (FP16)
 -  ~1.8× faster decode at 4k sequence length
 -  Static-shape CUDA Graph capture for decode loops
 
+## Profiling with Nsight Compute
+
+### Commands
+
+**Profile attention benchmark:**
+
+```bash
+# Inside the Docker container
+docker exec <container_id> ncu --set full --target-processes all \
+  --kernel-name-base function -o /workspace/profiling/reports/triton_attn \
+  python benchmarks/attention_bench.py
+```
+
+**View the report:**
+
+```bash
+# Download and open with Nsight Compute UI on Windows
+ncu-ui profiling/reports/triton_attn.ncu-rep
+```
+
+### Windows Permission Issue
+
+On Windows with Docker/WSL2, you may encounter:
+
+```
+ERR_NVGPUCTRPERM - The user does not have permission to access NVIDIA GPU Performance Counters
+```
+
+**Attempted fixes:**
+
+1. **Enable Developer Mode**: Settings → Privacy & Security → For developers → Enable "Developer Mode"
+2. **Set persistence mode** (may not work on mobile GPUs):
+   ```powershell
+   # Run as Administrator
+   nvidia-smi -i 0 -pm 1
+   ```
+
+**Known limitation**: Windows with mobile GPUs (like RTX 5090 Laptop) may not support full profiling API access through Docker/WSL2. This works reliably on Linux or native Windows CUDA applications.
+
+### Expected Profiling Results (Theoretical Analysis)
+
+Based on the Triton kernel design, expected NCU metrics:
+
+**Memory Characteristics:**
+
+-  **Memory Bound**: Attention is typically limited by DRAM bandwidth, not compute
+-  **Expected DRAM throughput**: ~60-80% of peak (typical for well-optimized kernels)
+-  **Expected L2 cache hit rate**: 15-25% (from block tiling reuse)
+
+**Compute Characteristics:**
+
+-  **SM utilization**: 40-60% (memory-bound workload won't saturate compute)
+-  **Warp efficiency**: 85-95% (good coalescing with proper tiling)
+-  **Occupancy**: ~50-75% (limited by shared memory usage for BLOCK_M/N=32)
+
+**Optimization Opportunities:**
+
+-  **Increase block sizes** if shared memory permits (currently 32×32 to fit in 101KB limit)
+-  **Tune num_warps** parameter (currently 4, could try 8)
+-  **Use async memory operations** for overlapping loads/compute
+-  **Experiment with different data layouts** (row-major vs column-major)
+
+**Bottleneck Analysis:**
+The kernel is likely **memory-bound** because:
+
+1. Attention requires O(N²) memory accesses for O(N²D) compute
+2. Fused softmax reduces intermediate writes but still loads Q, K, V
+3. Online algorithm trades extra compute (exp rescaling) for memory savings
+
 ## RTX 5090 Compatibility Notes
 
 ### Problem: sm_120 Architecture Support Gap

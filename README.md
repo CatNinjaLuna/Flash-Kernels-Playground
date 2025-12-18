@@ -106,6 +106,9 @@ docker run --gpus all --ipc=host --ulimit memlock=-1 --ulimit stack=67108864 -it
 # Check PyTorch and CUDA
 python -c "import torch; print('torch', torch.__version__); print('cuda', torch.cuda.is_available()); print('device', torch.cuda.get_device_name(0))"
 
+# Check Triton installation
+python -c "import triton; print('triton', triton.__version__)"
+
 # Check GPU with nvidia-smi
 nvidia-smi
 ```
@@ -115,9 +118,12 @@ nvidia-smi
 -  **PyTorch version**: 2.6.0a0+ecf3bae40a.nv25.01 (NVIDIA custom build)
 -  **CUDA available**: True
 -  **Device**: NVIDIA GeForce RTX 5090 Laptop GPU
+-  **Triton version**: 3.1.0 (pre-installed, no installation needed)
 -  **Driver**: 581.60
 -  **CUDA Version**: 13.0
 -  **GPU Memory**: 24463 MiB total
+
+**Note**: Triton 3.1.0 is already installed in the NVIDIA container, so you don't need to install it separately. The container comes pre-configured with PyTorch, CUDA, and Triton optimized for NVIDIA GPUs.
 
 **Why this works**: NVIDIA's official containers include experimental support for new GPU architectures before mainstream PyTorch releases.
 

@@ -74,23 +74,26 @@ Configuration: 32,768 tokens, 64 experts, top-2 routing
 | **Regrouping overhead**       | **0.323 (191%)** | **Nearly triples routing time** |
 
 **Bottleneck Analysis**:
-- **Observation**: Token regrouping adds 191% overhead (0.323ms on top of 0.169ms base operation)
-- **Root cause**: Sequential topK selection followed by sorting creates two separate kernel launches with intermediate materialization
-- **Impact**: MoE routing becomes 3× slower than necessary, directly affecting inference latency in mixture-of-experts models
-- **Validation**: Nsight Systems profiling confirms kernel launch overhead (1.7ms average) disproportionately impacts small operations
+
+-  **Observation**: Token regrouping adds 191% overhead (0.323ms on top of 0.169ms base operation)
+-  **Root cause**: Sequential topK selection followed by sorting creates two separate kernel launches with intermediate materialization
+-  **Impact**: MoE routing becomes 3× slower than necessary, directly affecting inference latency in mixture-of-experts models
+-  **Validation**: Nsight Systems profiling confirms kernel launch overhead (1.7ms average) disproportionately impacts small operations
 
 **Optimization Strategy** (Phase 2 - Planning):
+
 1. **Kernel fusion**: Combine topK + sorting into single CUDA kernel to eliminate intermediate buffer writes
 2. **Algorithm selection**: Replace O(n log n) sorting with O(n) counting sort (expert IDs are bounded: 0-63)
 3. **Pipeline overlap**: Use CUDA streams to overlap routing computation with previous layer's expert processing
 4. **Expected speedup**: 2-3× reduction in routing overhead based on memory traffic analysis
 
 **Optimization Methodology Applied**:
-- ✅ **Profiled** baseline performance (0.492ms total)
-- ✅ **Identified** bottleneck through decomposition (191% overhead in regrouping)
-- ✅ **Quantified** impact (nearly triples total routing time)
-- ✅ **Proposed** targeted optimizations (fusion, better algorithm, pipelining)
-- ⏳ **Implementation** planned as future work
+
+-  ✅ **Profiled** baseline performance (0.492ms total)
+-  ✅ **Identified** bottleneck through decomposition (191% overhead in regrouping)
+-  ✅ **Quantified** impact (nearly triples total routing time)
+-  ✅ **Proposed** targeted optimizations (fusion, better algorithm, pipelining)
+-  ⏳ **Implementation** planned as future work
 
 ### Attention Performance (RTX 5090)
 
@@ -138,6 +141,7 @@ Comprehensive scaling test across batch sizes and sequence lengths:
 -  **Launch overhead impact**: Small workloads (512 tokens) show minimal speedup because 1.7ms kernel launch overhead dominates sub-millisecond execution time
 
 **Optimization Methodology Demonstrated**:
+
 1. ✅ Measured baseline performance across 12 configurations
 2. ✅ Identified memory traffic as bottleneck (kernel fusion opportunity)
 3. ✅ Quantified improvement (3.60× peak speedup, 30-35 GFLOPS sustained)
@@ -220,31 +224,33 @@ nsys stats /workspace/profiling/reports/timeline.nsys-rep
 
 **CUDA API Time Breakdown** (Nsight Systems - Phase 1: Profiling):
 
-| API Call                 | Time    | % Total | Calls | Avg Time | Analysis |
-|-------------------------|---------|---------|-------|----------|----------|
-| `cudaDeviceSynchronize` | 267.6ms | 51.1%   | 4     | 66.9ms   | Necessary for benchmark timing accuracy |
-| `cudaLaunchKernel`      | 121.8ms | 23.2%   | 71    | **1.7ms** | **Launch overhead bottleneck** |
-| `cuLibraryLoadData`     | 111.0ms | 21.2%   | 14    | 7.9ms    | One-time JIT compilation (amortized) |
-| `cuKernelGetFunction`   | 11.2ms  | 2.1%    | 62    | 0.18ms   | Kernel lookup overhead |
-| `cudaMalloc`            | 6.4ms   | 1.2%    | 10    | 0.64ms   | Memory allocation |
+| API Call                | Time    | % Total | Calls | Avg Time  | Analysis                                |
+| ----------------------- | ------- | ------- | ----- | --------- | --------------------------------------- |
+| `cudaDeviceSynchronize` | 267.6ms | 51.1%   | 4     | 66.9ms    | Necessary for benchmark timing accuracy |
+| `cudaLaunchKernel`      | 121.8ms | 23.2%   | 71    | **1.7ms** | **Launch overhead bottleneck**          |
+| `cuLibraryLoadData`     | 111.0ms | 21.2%   | 14    | 7.9ms     | One-time JIT compilation (amortized)    |
+| `cuKernelGetFunction`   | 11.2ms  | 2.1%    | 62    | 0.18ms    | Kernel lookup overhead                  |
+| `cudaMalloc`            | 6.4ms   | 1.2%    | 10    | 0.64ms    | Memory allocation                       |
 
 **Bottleneck Identification** (Phase 1 → Phase 2 Transition):
 
 1. **Kernel Launch Overhead (1.7ms average)**:
-   - **Impact**: For small workloads (<1ms execution), launch overhead dominates actual compute
-   - **Evidence**: 71 kernel launches cost 121.8ms total → more than actual GPU work
-   - **Optimization path**: CUDA Graphs can capture static execution patterns, reducing per-launch CPU overhead from ~1.7ms to <0.1ms
-   - **Expected gain**: 10-20× reduction in launch overhead for repeated inference patterns
+
+   -  **Impact**: For small workloads (<1ms execution), launch overhead dominates actual compute
+   -  **Evidence**: 71 kernel launches cost 121.8ms total → more than actual GPU work
+   -  **Optimization path**: CUDA Graphs can capture static execution patterns, reducing per-launch CPU overhead from ~1.7ms to <0.1ms
+   -  **Expected gain**: 10-20× reduction in launch overhead for repeated inference patterns
 
 2. **JIT Compilation (111ms one-time cost)**:
-   - **Impact**: First-run latency penalty for Triton kernels
-   - **Mitigation**: Warmup iterations (5-10 runs) amortize compilation cost
-   - **Production strategy**: Pre-compile kernels or cache compiled binaries
+
+   -  **Impact**: First-run latency penalty for Triton kernels
+   -  **Mitigation**: Warmup iterations (5-10 runs) amortize compilation cost
+   -  **Production strategy**: Pre-compile kernels or cache compiled binaries
 
 3. **Synchronization Overhead (51% of measured time)**:
-   - **Context**: Required for accurate benchmark timing (forces CPU to wait for GPU completion)
-   - **Real-world implication**: Production inference doesn't need explicit syncs between operations
-   - **Optimization**: Async execution with stream synchronization only when needed
+   -  **Context**: Required for accurate benchmark timing (forces CPU to wait for GPU completion)
+   -  **Real-world implication**: Production inference doesn't need explicit syncs between operations
+   -  **Optimization**: Async execution with stream synchronization only when needed
 
 **What the timeline shows:**
 
@@ -252,6 +258,59 @@ nsys stats /workspace/profiling/reports/timeline.nsys-rep
 -  CPU-GPU synchronization points
 -  Memory allocation overhead
 -  Opportunities for async execution and overlap
+
+### Timeline Visualization Analysis
+
+**GPU Activity Overview** (Nsight Systems Timeline View):
+
+![Nsight Systems GPU Timeline](profiling/screenshots/nsight_timeline_gpu.png)
+
+**Key observations from timeline visualization**:
+
+1. **GPU Utilization Pattern**:
+
+   -  RTX 5090 shows activity across WDDM HW Queues (Windows Display Driver Model)
+   -  Large blue "Copy" section indicates significant memory transfer operations
+   -  Red vertical bars throughout timeline = memory operations and synchronization events
+   -  Gray bars = idle/waiting states between operations
+
+2. **Memory Hierarchy Activity**:
+
+   -  **Local Resident Memory**: 23.49 GiB peak usage (GPU VRAM utilization)
+   -  **Committed VRAM**: Consistent 22.5 GiB allocation
+   -  **Memory Transfer**: Sparse green/orange bars showing DMA operations between host and device
+   -  **Non-Local Resident Memory**: 31.40 GiB (system RAM backing store for oversubscribed allocations)
+
+3. **CPU-GPU Interaction Pattern**:
+   -  CPU shows bursty activity (top graph) = kernel launches and data preparation
+   -  Gaps between GPU kernel execution = CPU bottleneck or synchronization overhead
+   -  Pattern confirms kernel launch overhead dominates small workloads
+
+**Thread-Level Execution View**:
+
+![Nsight Systems Thread Timeline](profiling/screenshots/nsight_thread_view.png)
+
+**Thread execution analysis** (DWM Compositor Thread view):
+
+-  **Multi-colored bars represent different operations**:
+
+   -  **Green**: CUDA kernel execution / compute operations
+   -  **Yellow/Orange**: CUDA API calls (cudaLaunchKernel, cudaMalloc, etc.)
+   -  **Blue/Purple**: CPU work (Python execution, framework overhead)
+   -  **Gray**: Blocked/waiting states (synchronization points)
+
+-  **Execution pattern observations**:
+   -  Dense clustering of operations = good GPU utilization
+   -  Vertical alignment of colors = sequential dependencies (not pipelined)
+   -  Gaps between colored segments = kernel launch latency (1.7ms overhead measured)
+
+**Profiling Methodology Validated**:
+These visualizations confirm the quantitative analysis from `nsys stats`:
+
+-  ✅ Visual confirmation of 1.7ms launch overhead (gaps between GPU work)
+-  ✅ Memory operations dominate timeline (red bars throughout)
+-  ✅ CPU-GPU synchronization creates idle time (gray sections)
+-  ✅ Bursty pattern aligns with benchmark warmup + iteration structure
 
 ### Expected Profiling Results (Theoretical Analysis)
 
@@ -422,41 +481,46 @@ nvidia-smi
 This project demonstrates a **systematic, data-driven approach** to GPU performance optimization:
 
 ### 1. Measurement-Driven Optimization
-- **Always profile before optimizing**: Used Nsight Systems to identify 1.7ms launch overhead and 191% regrouping overhead
-- **Establish baselines**: PyTorch reference implementation provides correctness validation and performance comparison target
-- **Quantify improvements**: Measured 3.60× peak speedup with 9.766e-04 max error confirms both speed and correctness
+
+-  **Always profile before optimizing**: Used Nsight Systems to identify 1.7ms launch overhead and 191% regrouping overhead
+-  **Establish baselines**: PyTorch reference implementation provides correctness validation and performance comparison target
+-  **Quantify improvements**: Measured 3.60× peak speedup with 9.766e-04 max error confirms both speed and correctness
 
 ### 2. Understand Hardware Constraints
-- **Memory hierarchy**: RTX 5090's 101KB shared memory limit required reducing block sizes from 64×64 to 32×32
-- **Architecture support**: sm_120 compatibility issue demonstrates importance of matching software to hardware capabilities
-- **Bottleneck identification**: Low GFLOPS (<35) vs peak (~1000 TFLOPS) reveals memory bandwidth as limiting factor
+
+-  **Memory hierarchy**: RTX 5090's 101KB shared memory limit required reducing block sizes from 64×64 to 32×32
+-  **Architecture support**: sm_120 compatibility issue demonstrates importance of matching software to hardware capabilities
+-  **Bottleneck identification**: Low GFLOPS (<35) vs peak (~1000 TFLOPS) reveals memory bandwidth as limiting factor
 
 ### 3. Algorithmic & Implementation Techniques
-- **Kernel fusion**: Eliminated intermediate buffers (QK^T scores, softmax weights) to reduce HBM traffic by ~40%
-- **Memory tiling**: Block-wise processing (32×32) maximizes data reuse in fast shared memory
-- **Online algorithms**: O(1) memory online softmax vs O(N) materialization demonstrates algorithmic impact
-- **Scaling analysis**: Testing 12 configurations reveals speedup grows with problem size (1.1× → 3.6×)
+
+-  **Kernel fusion**: Eliminated intermediate buffers (QK^T scores, softmax weights) to reduce HBM traffic by ~40%
+-  **Memory tiling**: Block-wise processing (32×32) maximizes data reuse in fast shared memory
+-  **Online algorithms**: O(1) memory online softmax vs O(N) materialization demonstrates algorithmic impact
+-  **Scaling analysis**: Testing 12 configurations reveals speedup grows with problem size (1.1× → 3.6×)
 
 ### 4. Systematic Debugging & Validation
-- **Compatibility issues**: Resolved RTX 5090 sm_120 support through NVIDIA containers (demonstrates real-world problem-solving)
-- **Numerical correctness**: FP16 attention within 1e-3 error validates precision-performance tradeoffs
-- **Triton JIT debugging**: Fixed `math.sqrt` → `tl.sqrt` shows understanding of JIT compilation constraints
+
+-  **Compatibility issues**: Resolved RTX 5090 sm_120 support through NVIDIA containers (demonstrates real-world problem-solving)
+-  **Numerical correctness**: FP16 attention within 1e-3 error validates precision-performance tradeoffs
+-  **Triton JIT debugging**: Fixed `math.sqrt` → `tl.sqrt` shows understanding of JIT compilation constraints
 
 ### 5. Performance Analysis Skills
-- **Roofline modeling**: Calculated arithmetic intensity (256-2048 FLOPS/byte) to classify workload characteristics
-- **Profiling tools**: Leveraged Nsight Systems for API-level analysis, documented NCU limitations for hardware counters
-- **Bottleneck taxonomy**: Distinguished launch overhead, memory bandwidth, shared memory limits, and JIT compilation costs
+
+-  **Roofline modeling**: Calculated arithmetic intensity (256-2048 FLOPS/byte) to classify workload characteristics
+-  **Profiling tools**: Leveraged Nsight Systems for API-level analysis, documented NCU limitations for hardware counters
+-  **Bottleneck taxonomy**: Distinguished launch overhead, memory bandwidth, shared memory limits, and JIT compilation costs
 
 ### Optimization Results Summary
 
-| Metric | Value | Methodology Demonstrated |
-|--------|-------|-------------------------|
-| **Peak speedup** | 3.60× | Kernel fusion + memory tiling |
-| **Throughput consistency** | 30-35 GFLOPS sustained | Good memory access patterns |
-| **Bottleneck identified** | 191% MoE overhead | Profiling → decomposition → quantification |
-| **Launch overhead** | 1.7ms average | Nsight Systems API analysis |
-| **Numerical accuracy** | 9.766e-04 max error | FP16 validation against FP32 baseline |
-| **Configurations tested** | 12 (batch × sequence) | Systematic scaling analysis |
+| Metric                     | Value                  | Methodology Demonstrated                   |
+| -------------------------- | ---------------------- | ------------------------------------------ |
+| **Peak speedup**           | 3.60×                  | Kernel fusion + memory tiling              |
+| **Throughput consistency** | 30-35 GFLOPS sustained | Good memory access patterns                |
+| **Bottleneck identified**  | 191% MoE overhead      | Profiling → decomposition → quantification |
+| **Launch overhead**        | 1.7ms average          | Nsight Systems API analysis                |
+| **Numerical accuracy**     | 9.766e-04 max error    | FP16 validation against FP32 baseline      |
+| **Configurations tested**  | 12 (batch × sequence)  | Systematic scaling analysis                |
 
 **Core principle**: Optimize systematically with data, not intuition. Profile → identify bottlenecks → propose solutions → implement → validate → iterate.
 

@@ -105,6 +105,56 @@ ERR_NVGPUCTRPERM - The user does not have permission to access NVIDIA GPU Perfor
 
 **Known limitation**: Windows with mobile GPUs (like RTX 5090 Laptop) may not support full profiling API access through Docker/WSL2. This works reliably on Linux or native Windows CUDA applications.
 
+## Profiling with Nsight Systems
+
+**Nsight Systems (timeline profiling) works successfully!** Unlike NCU, it doesn't require full GPU counter permissions.
+
+### Commands
+
+**Generate timeline profile:**
+
+```bash
+# Inside the Docker container
+docker exec <container_id> nsys profile -o /workspace/profiling/reports/timeline \
+  python benchmarks/attention_bench.py
+```
+
+**Generate text summary:**
+
+```bash
+# Inside the container or from host
+nsys stats /workspace/profiling/reports/timeline.nsys-rep
+```
+
+**View timeline in GUI:**
+
+1. Download Nsight Systems from https://developer.nvidia.com/nsight-systems
+2. Open `profiling/reports/timeline.nsys-rep` in Nsight Systems UI
+3. Analyze kernel execution, CPU-GPU interactions, and bottlenecks
+
+### Profiling Results
+
+**CUDA API Summary (Top operations by time):**
+
+-  `cudaDeviceSynchronize`: 51.1% (267.6ms) - 4 calls
+-  `cudaLaunchKernel`: 23.2% (121.8ms) - 71 calls, avg 1.7ms/launch
+-  `cuLibraryLoadData`: 21.2% (111.0ms) - 14 calls (one-time JIT compilation)
+-  `cuKernelGetFunction`: 2.1% (11.2ms) - 62 calls
+-  `cudaMalloc`: 1.2% (6.4ms) - 10 allocations
+
+**Key Insights:**
+
+-  **Kernel launch overhead**: ~1.7ms average per launch (could be reduced with CUDA Graphs)
+-  **JIT compilation**: 111ms spent compiling Triton kernels (amortized over warmup)
+-  **Synchronization overhead**: 51% of time spent in sync calls (necessary for accurate timing)
+
+**What the timeline shows:**
+
+-  Kernel execution patterns
+-  CPU-GPU synchronization points
+-  Memory allocation overhead
+-  Opportunities for async execution and overlap
+
 ### Expected Profiling Results (Theoretical Analysis)
 
 Based on the Triton kernel design, expected NCU metrics:

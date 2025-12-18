@@ -69,11 +69,55 @@ Attempted solutions:
 
 ### Solution: NVIDIA Official Containers
 
+**Pull the container:**
+
 ```bash
 docker pull nvcr.io/nvidia/pytorch:25.01-py3
+```
+
+**Run benchmarks (one-off command):**
+
+```bash
 docker run --rm --gpus all -v ${PWD}:/workspace nvcr.io/nvidia/pytorch:25.01-py3 \
     python /workspace/benchmarks/moe_routing_bench.py
 ```
+
+**Start interactive development session:**
+
+```bash
+docker run --gpus all --ipc=host --ulimit memlock=-1 --ulimit stack=67108864 -it \
+  -v ${PWD}:/workspace -w /workspace \
+  nvcr.io/nvidia/pytorch:25.01-py3
+```
+
+**Flags explained:**
+
+-  `--gpus all` - Enable GPU access
+-  `--ipc=host` - Use host IPC namespace for better shared memory performance
+-  `--ulimit memlock=-1` - Remove memory locking limits for CUDA
+-  `--ulimit stack=67108864` - Set stack size to 64MB (recommended for PyTorch)
+-  `-it` - Interactive terminal
+-  `-v ${PWD}:/workspace` - Mount current directory to /workspace
+-  `-w /workspace` - Set working directory
+
+**Verify container setup (inside container):**
+
+```bash
+# Check PyTorch and CUDA
+python -c "import torch; print('torch', torch.__version__); print('cuda', torch.cuda.is_available()); print('device', torch.cuda.get_device_name(0))"
+
+# Check GPU with nvidia-smi
+nvidia-smi
+```
+
+**Expected output:**
+
+-  **PyTorch version**: 2.6.0a0+ecf3bae40a.nv25.01 (NVIDIA custom build)
+-  **CUDA available**: True
+-  **Device**: NVIDIA GeForce RTX 5090 Laptop GPU
+-  **Driver**: 581.60
+-  **CUDA Version**: 13.0
+-  **GPU Memory**: 24463 MiB total
 
 **Why this works**: NVIDIA's official containers include experimental support for new GPU architectures before mainstream PyTorch releases.
 

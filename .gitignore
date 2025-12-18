@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+*.ncu-rep
+*.nsys-rep
+*.sqlite
+.env
+.venv

@@ -296,12 +296,62 @@ nvidia-smi
 -  Container-based development for cutting-edge hardware
 -  Real-world engineering tradeoffs
 
+## Future Work
+
+### High-Priority Optimizations
+
+1. **Fused MoE Routing Kernel** (addresses 191% overhead)
+
+   -  Combine topK selection with token regrouping in a single kernel pass
+   -  Implement counting sort for bounded expert IDs (O(n) vs O(n log n))
+   -  Potential speedup: 2-3× reduction in routing overhead
+
+2. **CUDA Graphs Integration**
+
+   -  Capture entire attention/MoE layer dispatch to eliminate 1.7ms launch overhead
+   -  Particularly beneficial for decode phase with static shapes
+   -  Expected improvement: 20-30% latency reduction in repeated inference
+
+3. **Block Size Auto-Tuning**
+   -  Test BLOCK_M/BLOCK_N combinations: [16, 32, 64, 128]
+   -  Create performance heatmap across sequence lengths
+   -  Find optimal balance between occupancy and shared memory usage
+   -  Current: 32×32 (fits in 101KB limit), may benefit from architecture-specific tuning
+
+### Correctness & Robustness
+
+4. **Numerical Stability Tests**
+
+   -  Test attention with extreme values (very large/small logits)
+   -  Verify online softmax handles overflow/underflow correctly
+   -  Edge cases: zero queries, degenerate attention patterns
+   -  Goal: Production-ready validation suite
+
+5. **Multi-GPU Scaling**
+   -  Benchmark cross-device communication overhead
+   -  Expert parallelism strategies for MoE layers
+   -  NCCL integration for distributed inference
+
+### Advanced Features
+
+6. **Quantization Support**
+
+   -  FP8 Tensor Core utilization (Hopper/Blackwell)
+   -  INT8 quantization for attention Q/K/V
+   -  Mixed-precision inference patterns
+
+7. **FlashAttention-2 Features**
+   -  Non-power-of-2 head dimensions
+   -  Causal masking optimization
+   -  Variable sequence length batching
+
 ## Repo Structure
 
 ```
 kernels/            # CUDA / Triton / CUTLASS kernels
 benchmarks/         # Attention & MoE benchmarks
   ├── attention_bench.py
+  ├── attention_scaling.py
   └── moe_routing_bench.py
 profiling/          # Nsight configs and reports
 scripts/            # Build and run scripts

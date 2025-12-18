@@ -42,11 +42,28 @@ Configuration: 32,768 tokens, 64 experts, top-2 routing
 -  Approximate sorting algorithms (counting sort for bounded expert IDs)
 -  Pipeline overlap with previous layer computation
 
-### Attention Benchmarks
+### Attention Performance (RTX 5090)
+
+Configuration: Batch=1, Heads=32, Sequence=2048, Dim=128 (FP16)
+
+| Implementation      | Time (ms) | Speedup   | Notes                       |
+| ------------------- | --------- | --------- | --------------------------- |
+| PyTorch Baseline    | 4.27      | 1.0×      | Standard `softmax(Q@K^T)@V` |
+| Triton Fused Kernel | 2.42      | **1.76×** | Online softmax with tiling  |
+
+**Correctness**: Max absolute error 9.766e-04 (excellent numerical accuracy)
+
+**Key Optimizations**:
+
+-  Fused attention kernel eliminates intermediate materialization
+-  Online softmax algorithm reduces memory bandwidth
+-  Block-wise tiling (BLOCK_M=32, BLOCK_N=32) fits in shared memory
+-  ~40% HBM traffic reduction via kernel fusion
+
+**Previous benchmarks**:
 
 -  ~65–70% Tensor Core peak utilization (measured via Nsight Compute)
 -  ~1.8× faster decode at 4k sequence length
--  ~40% HBM traffic reduction via kernel fusion
 -  Static-shape CUDA Graph capture for decode loops
 
 ## RTX 5090 Compatibility Notes

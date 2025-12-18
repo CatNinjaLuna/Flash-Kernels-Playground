@@ -49,7 +49,8 @@ def attn_fwd_kernel(Q, K, V, Out,
         v = tl.load(v_ptr, mask=(n_offsets[:, None] < N), other=0.0).to(tl.float32)  # [BN, D]
 
         # scores = q @ k : [BM, BN]
-        scores = tl.dot(q, k) / math.sqrt(D)
+        scale = 1.0 / tl.sqrt(D * 1.0)
+        scores = tl.dot(q, k) * scale
 
         # online softmax update
         tile_max = tl.max(scores, axis=1)
@@ -67,7 +68,7 @@ def attn_fwd_kernel(Q, K, V, Out,
     tl.store(out_ptr, out.to(tl.float16), mask=(m_offsets[:, None] < M))
 
 
-def triton_attention(q, k, v, block_m=64, block_n=64):
+def triton_attention(q, k, v, block_m=32, block_n=32):
     assert q.is_cuda and k.is_cuda and v.is_cuda
     assert q.dtype in (torch.float16, torch.bfloat16)
     B, H, M, D = q.shape

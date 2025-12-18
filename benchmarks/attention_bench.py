@@ -22,14 +22,14 @@ def benchmark(fn, warmup=10, iters=50, device="cuda"):
 if __name__ == "__main__":
     torch.manual_seed(0)
     
-    # Use CPU until PyTorch supports RTX 5090 (sm_120)
-    device = "cpu"
-    # device = "cuda"  # Uncomment when PyTorch adds sm_120 support
+    # RTX 5090 (sm_120) now supported via NVIDIA container
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     
-    B, H, S, D = 1, 32, 1024, 128  # Reduced S for CPU testing
-    q = torch.randn(B, H, S, D, device=device, dtype=torch.float32)  # float32 for CPU
-    k = torch.randn(B, H, S, D, device=device, dtype=torch.float32)
-    v = torch.randn(B, H, S, D, device=device, dtype=torch.float32)
+    B, H, S, D = 1, 32, 2048, 128  # Increased S for GPU testing
+    dtype = torch.float16 if device == "cuda" else torch.float32
+    q = torch.randn(B, H, S, D, device=device, dtype=dtype)
+    k = torch.randn(B, H, S, D, device=device, dtype=dtype)
+    v = torch.randn(B, H, S, D, device=device, dtype=dtype)
 
     def baseline():
         attn = torch.softmax((q @ k.transpose(-1, -2)) / (D ** 0.5), dim=-1)

@@ -36,7 +36,7 @@ Built on an RTX 5090 (Blackwell sm_120) using Triton, CUDA C++, and Nsight tooli
 
 ---
 
-## Attention Benchmark — Scaling Analysis
+## Attention Benchmark & Scaling Analysis
 
 Configuration: Batch=1–4, Heads=32, Dim=128, FP16
 
@@ -59,6 +59,77 @@ Configuration: Batch=1–4, Heads=32, Dim=128, FP16
 
 ---
 
+## How It Works: Tiling and Memory Hierarchy
+
+Standard PyTorch attention runs three separate GPU kernels sequentially: `QKᵀ`, softmax, then `attn × V`, writing intermediate results to HBM between each step. The fused Triton kernel eliminates those round-trips by processing data in **tiles** small enough to fit in on-chip shared memory (SRAM), computing the full pipeline without touching HBM for intermediates.
+
+### What Is a Tile?
+
+The Q matrix (shape: `SeqLen × d_head`) is too large to fit in shared memory at once. Instead it is cut into rectangular chunks called tiles. One tile is loaded from HBM into shared memory, the full `QKᵀ → softmax → V` computation runs on-chip for that chunk, and then the next tile is fetched. `BLOCK_M` controls how many rows of Q each tile covers.
+
+### BLOCK_M = 32 vs BLOCK_M = 64
+
+![Tiling Comparison](tiling_comparison.png)
+
+#### Shared Memory per Block
+
+Each block must hold Q, K, and V tiles simultaneously. With `BLOCK_N=64` fixed and FP16 (`2 bytes per element`):
+
+```
+Q tile  =  BLOCK_M  × BLOCK_N × 2 bytes
+K tile  =  BLOCK_N  × BLOCK_N × 2 bytes
+V tile  =  BLOCK_N  × BLOCK_N × 2 bytes
+Total   =  Q_tile + K_tile + V_tile
+```
+
+| | BLOCK_M = 32 | BLOCK_M = 64 |
+|---|---|---|
+| Q tile | 32 × 64 × 2 = **4 KB** | 64 × 64 × 2 = **8 KB** |
+| K tile | 64 × 64 × 2 = **8 KB** | 64 × 64 × 2 = **8 KB** |
+| V tile | 64 × 64 × 2 = **8 KB** | 64 × 64 × 2 = **8 KB** |
+| **Total** | **20 KB** | **24 KB** |
+
+> K and V tiles are always square (`BLOCK_N × BLOCK_N`) because they are tiled along the key/value sequence dimension, not the query dimension, thus they do not change when `BLOCK_M` changes.
+
+#### Concurrent Blocks per SM
+
+The RTX 5090 has **101 KB** of usable shared memory per SM. The number of blocks that can run simultaneously:
+
+```
+concurrent_blocks = floor(sm_shared_memory / total_tile_size)
+```
+
+| | BLOCK_M = 32 | BLOCK_M = 64 |
+|---|---|---|
+| Calculation | floor(101 / 20) | floor(101 / 24) |
+| **Concurrent blocks** | **5 blocks** ↑ more latency hiding | **4 blocks** ↓ less latency hiding |
+
+> `floor` rounds down to the nearest whole integer — a block either fits entirely in shared memory or it does not. The leftover KB (1 KB at BM=32, 5 KB at BM=64) sits unused.
+
+#### HBM Passes to Cover the Full Q Matrix
+
+```
+hbm_passes = SeqLen / BLOCK_M
+```
+
+| | BLOCK_M = 32 | BLOCK_M = 64 |
+|---|---|---|
+| Calculation | 256 / 32 | 256 / 64 |
+| **HBM passes** | **8 passes** ↑ more trips | **4 passes** ↓ fewer trips |
+
+#### The Tradeoff
+
+```
+larger BLOCK_M
+    → more shared memory per block      (Q tile doubles from 4 KB → 8 KB)
+    → fewer blocks fit on SM            (5 → 4, less latency hiding)
+    → fewer HBM round-trips needed      (8 → 4 passes)
+```
+
+Larger `BLOCK_M` is better when sequences are long and HBM bandwidth is the bottleneck (the 3.60× speedup at SeqLen=2048 case). Smaller `BLOCK_M` is better when sequences are short and SM parallelism matters more. Finding the optimal block size per architecture and sequence length is what the **block size auto-tuning** next step targets.
+
+---
+
 ## MoE Routing Bottleneck
 
 Configuration: 32,768 tokens, 64 experts, top-2 routing
@@ -71,7 +142,7 @@ Configuration: 32,768 tokens, 64 experts, top-2 routing
 
 **Root cause:** `torch.argsort` across 65,536 elements is cache-unfriendly and breaks coalesced memory access patterns the GPU depends on. Two separate kernel launches also add unnecessary materialization of intermediate buffers.
 
-**Proposed fix:** fuse `topK` + sort into a single CUDA kernel using counting sort, expert IDs are bounded 0–63, making O(n) counting sort viable with no warp divergence and coalesced writes.
+**Proposed fix:** fuse `topK` + sort into a single CUDA kernel using counting sort — expert IDs are bounded 0–63, making O(n) counting sort viable with no warp divergence and coalesced writes.
 
 ---
 

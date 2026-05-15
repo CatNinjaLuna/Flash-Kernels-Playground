@@ -55,7 +55,7 @@ Configuration: Batch=1–4, Heads=32, Dim=128, FP16
 | 4 | 2048 | 3.61ms | 1.09ms | 3.31× |
 | 4 | 4096 | 12.45ms | 4.09ms | 3.04× |
 
-**Why speedup grows with sequence length:** at small sizes (512 tokens), the 1.7ms kernel launch overhead dominates sub-millisecond execution. As sequence length grows, the O(N²) memory traffic savings from kernel fusion compound — the Triton kernel maintains 30–35 GFLOPS while the baseline degrades from 23 → 10 GFLOPS.
+**Why speedup grows with sequence length:** at small sizes (512 tokens), the 1.7ms kernel launch overhead dominates sub-millisecond execution. As sequence length grows, the O(N²) memory traffic savings from kernel fusion compound, the Triton kernel maintains 30–35 GFLOPS while the baseline degrades from 23 → 10 GFLOPS.
 
 ---
 
@@ -71,7 +71,7 @@ Configuration: 32,768 tokens, 64 experts, top-2 routing
 
 **Root cause:** `torch.argsort` across 65,536 elements is cache-unfriendly and breaks coalesced memory access patterns the GPU depends on. Two separate kernel launches also add unnecessary materialization of intermediate buffers.
 
-**Proposed fix:** fuse `topK` + sort into a single CUDA kernel using counting sort — expert IDs are bounded 0–63, making O(n) counting sort viable with no warp divergence and coalesced writes.
+**Proposed fix:** fuse `topK` + sort into a single CUDA kernel using counting sort, expert IDs are bounded 0–63, making O(n) counting sort viable with no warp divergence and coalesced writes.
 
 ---
 
@@ -89,7 +89,7 @@ Configuration: 32,768 tokens, 64 experts, top-2 routing
 
 ## Optimization Methodology
 
-This project follows a strict 4-phase workflow — no guessing, no premature optimization.
+This project follows a strict 4-phase workflow.
 
 ```
 Phase 1: Baseline & Profile
